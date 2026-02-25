@@ -12,7 +12,7 @@ import (
 
 func TestHealthHandler_NoDB(t *testing.T) {
 	app := fiber.New()
-	app.Get("/health", api.HealthHandler(nil))
+	app.Get("/health", api.HealthHandler(nil, nil))
 
 	req := httptest.NewRequest("GET", "/health", nil)
 	resp, err := app.Test(req)
@@ -30,7 +30,11 @@ func TestHealthHandler_NoDB(t *testing.T) {
 		t.Fatalf("failed to parse response: %v", err)
 	}
 
+	if result.Status != "degraded" {
+		t.Errorf("expected status 'degraded', got '%s'", result.Status)
+	}
+
 	if result.Services["postgres"] != "error" {
-		t.Errorf("expected postgres 'error' when db is nil, got '%s'", result.Services["postgres"])
+		t.Errorf("expected postgres error, got '%s'", result.Services["postgres"])
 	}
 }

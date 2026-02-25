@@ -8,12 +8,12 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/malikimayzar/arxiv-research-assistant/internal/api"
+	"github.com/malikimayzar/arxiv-research-assistant/internal/client"
 	"github.com/malikimayzar/arxiv-research-assistant/internal/middleware"
 	"github.com/malikimayzar/arxiv-research-assistant/internal/repository"
 )
 
 func main() {
-	// Database connection
 	db, err := repository.NewPostgresDB(repository.Config{
 		Host:     getEnv("DB_HOST", "localhost"),
 		Port:     getEnv("DB_PORT", "5432"),
@@ -25,7 +25,14 @@ func main() {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
 	defer db.Close()
-	log.Println("Connected to PostgreSQL")
+	log.Println("✅ Connected to PostgreSQL")
+
+	mlClient := client.NewMLClient(getEnv("ML_SERVICE_URL", "http://localhost:8001"))
+	if err := mlClient.Ping(); err != nil {
+		log.Printf("⚠️  ML service not reachable: %v", err)
+	} else {
+		log.Println("✅ Connected to ML service")
+	}
 
 	app := fiber.New(fiber.Config{
 		AppName:      "ArXiv Research Assistant v0.1.0",
@@ -38,9 +45,9 @@ func main() {
 		Format: "[${time}] ${status} - ${latency} ${method} ${path} | req-id: ${respHeader:X-Request-ID}\n",
 	}))
 
-	app.Get("/health", api.HealthHandler(db))
+	app.Get("/health", api.HealthHandler(db, mlClient))
 
-	log.Println("Server starting on :8080")
+	log.Println("🚀 Server starting on :8080")
 	log.Fatal(app.Listen(":8080"))
 }
 

@@ -3,6 +3,7 @@ package api
 import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/jmoiron/sqlx"
+	"github.com/malikimayzar/arxiv-research-assistant/internal/client"
 )
 
 type HealthResponse struct {
@@ -11,18 +12,23 @@ type HealthResponse struct {
 	Services map[string]string `json:"services"`
 }
 
-func HealthHandler(db *sqlx.DB) fiber.Handler {
+func HealthHandler(db *sqlx.DB, ml *client.MLClient) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		services := map[string]string{
 			"postgres": "ok",
 			"qdrant":   "pending",
-			"ml":       "pending",
+			"ml":       "ok",
 		}
 
 		overallStatus := "ok"
 
 		if db == nil || db.Ping() != nil {
 			services["postgres"] = "error"
+			overallStatus = "degraded"
+		}
+
+		if ml == nil || ml.Ping() != nil {
+			services["ml"] = "error"
 			overallStatus = "degraded"
 		}
 
