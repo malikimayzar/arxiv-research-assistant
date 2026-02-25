@@ -1,0 +1,16 @@
+# Python
+python-ml/venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Go
+go-backend/tmp/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
