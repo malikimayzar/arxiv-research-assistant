@@ -9,8 +9,9 @@ import (
 )
 
 type MLClient struct {
-	baseURL    string
-	httpClient *http.Client
+	baseURL        string
+	httpClient     *http.Client
+	queryClient    *http.Client
 }
 
 func NewMLClient(baseURL string) *MLClient {
@@ -19,10 +20,12 @@ func NewMLClient(baseURL string) *MLClient {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		queryClient: &http.Client{
+			Timeout: 600 * time.Second,
+		},
 	}
 }
 
-// Embed request/response
 type EmbedRequest struct {
 	Texts []string `json:"texts"`
 }
@@ -61,7 +64,6 @@ func (c *MLClient) Embed(texts []string) (*EmbedResponse, error) {
 	return &result, nil
 }
 
-// Chunk request/response
 type ChunkRequest struct {
 	Text      string `json:"text"`
 	ChunkSize int    `json:"chunk_size"`
@@ -105,7 +107,60 @@ func (c *MLClient) Chunk(text string, chunkSize, overlap int) (*ChunkResponse, e
 	return &result, nil
 }
 
-// Ping ML service
+type QueryRequest struct {
+	Query   string `json:"query"`
+	TopK    int    `json:"top_k"`
+	Model   string `json:"model"`
+	ArxivID string `json:"arxiv_id,omitempty"`
+}
+
+type Source struct {
+	Text    string  `json:"text"`
+	Score   float32 `json:"score"`
+	ArxivID string  `json:"arxiv_id"`
+}
+
+type QueryMLResponse struct {
+	Answer       string   `json:"answer"`
+	Sources      []Source `json:"sources"`
+	RetrievalMs  int      `json:"retrieval_ms"`
+	GenerationMs int      `json:"generation_ms"`
+	Model        string   `json:"model"`
+}
+
+func (c *MLClient) Query(query string, topK int, model string, arxivID string) (*QueryMLResponse, error) {
+	body, err := json.Marshal(QueryRequest{
+		Query:   query,
+		TopK:    topK,
+		Model:   model,
+		ArxivID: arxivID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	resp, err := c.queryClient.Post(
+		c.baseURL+"/query",
+		"application/json",
+		bytes.NewBuffer(body),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("ml service query failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ml service returned status %d", resp.StatusCode)
+	}
+
+	var result QueryMLResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &result, nil
+}
+
 func (c *MLClient) Ping() error {
 	resp, err := c.httpClient.Get(c.baseURL + "/health")
 	if err != nil {

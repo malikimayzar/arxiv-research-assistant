@@ -25,13 +25,13 @@ func main() {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
 	defer db.Close()
-	log.Println("Connected to PostgreSQL")
+	log.Println("✅ Connected to PostgreSQL")
 
 	mlClient := client.NewMLClient(getEnv("ML_SERVICE_URL", "http://localhost:8001"))
 	if err := mlClient.Ping(); err != nil {
-		log.Printf("ML service not reachable: %v", err)
+		log.Printf("⚠️  ML service not reachable: %v", err)
 	} else {
-		log.Println("Connected to ML service")
+		log.Println("✅ Connected to ML service")
 	}
 
 	app := fiber.New(fiber.Config{
@@ -46,8 +46,9 @@ func main() {
 	}))
 
 	app.Get("/health", api.HealthHandler(db, mlClient))
+	app.Post("/query", api.QueryHandler(mlClient))
 
-	log.Println("Server starting on :8080")
+	log.Println("🚀 Server starting on :8080")
 	log.Fatal(app.Listen(":8080"))
 }
 
