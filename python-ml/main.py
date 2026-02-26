@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from sentence_transformers import SentenceTransformer
-from routers import embed, chunk, ingest, query
+from routers import embed, chunk, ingest, query, evaluate
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +23,7 @@ app.include_router(embed.router)
 app.include_router(chunk.router)
 app.include_router(ingest.router)
 app.include_router(query.router)
+app.include_router(evaluate.router)
 
 @app.get("/health")
 def health():
