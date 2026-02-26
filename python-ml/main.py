@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from sentence_transformers import SentenceTransformer
-from routers import embed, chunk, ingest
+from routers import embed, chunk, ingest, query
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -22,6 +22,7 @@ app = FastAPI(title="ArXiv ML Service", version="0.1.0", lifespan=lifespan)
 app.include_router(embed.router)
 app.include_router(chunk.router)
 app.include_router(ingest.router)
+app.include_router(query.router)
 
 @app.get("/health")
 def health():

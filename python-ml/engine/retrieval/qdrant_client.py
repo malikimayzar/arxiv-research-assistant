@@ -25,7 +25,7 @@ def ensure_collection(client: QdrantClient):
 def upsert_chunks(client: QdrantClient, chunks: list[dict]) -> list[str]:
     points = []
     ids = []
-    
+
     for chunk in chunks:
         point_id = str(uuid.uuid4())
         ids.append(point_id)
@@ -40,25 +40,32 @@ def upsert_chunks(client: QdrantClient, chunks: list[dict]) -> list[str]:
                 "categories": chunk.get("categories", []),
             }
         ))
-    
+
     client.upsert(collection_name=COLLECTION_NAME, points=points)
     logger.info(f"Upserted {len(points)} chunks to Qdrant")
     return ids
 
 def search(client: QdrantClient, query_vector: list[float], top_k: int = 5, arxiv_id: str = None):
     from qdrant_client.models import Filter, FieldCondition, MatchValue
-    
+
     query_filter = None
     if arxiv_id:
         query_filter = Filter(
             must=[FieldCondition(key="arxiv_id", match=MatchValue(value=arxiv_id))]
         )
-    
-    results = client.search(
+
+    results = client.query_points(
         collection_name=COLLECTION_NAME,
-        query_vector=query_vector,
+        query=query_vector,
         limit=top_k,
         query_filter=query_filter,
-    )
-    
-    return [{"text": r.payload["text"], "score": r.score, "arxiv_id": r.payload.get("arxiv_id")} for r in results]
+    ).points
+
+    return [
+        {
+            "text": r.payload["text"],
+            "score": r.score,
+            "arxiv_id": r.payload.get("arxiv_id"),
+        }
+        for r in results
+    ]
