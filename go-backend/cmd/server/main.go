@@ -3,10 +3,14 @@ package main
 import (
 	"log"
 	"os"
+	"runtime"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/adaptor"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/malikimayzar/arxiv-research-assistant/internal/api"
 	"github.com/malikimayzar/arxiv-research-assistant/internal/client"
 	"github.com/malikimayzar/arxiv-research-assistant/internal/middleware"
@@ -41,12 +45,22 @@ func main() {
 
 	app.Use(recover.New())
 	app.Use(middleware.RequestID())
+	app.Use(middleware.Metrics())
 	app.Use(logger.New(logger.Config{
 		Format: "[${time}] ${status} - ${latency} ${method} ${path} | req-id: ${respHeader:X-Request-ID}\n",
 	}))
 
 	app.Get("/health", api.HealthHandler(db, mlClient))
 	app.Post("/query", api.QueryHandler(mlClient))
+	app.Get("/metrics", adaptor.HTTPHandler(promhttp.Handler()))
+
+	// Update goroutine metrics every 10s
+	go func() {
+		for {
+			middleware.SetActiveGoroutines(float64(runtime.NumGoroutine()))
+			time.Sleep(10 * time.Second)
+		}
+	}()
 
 	log.Println("🚀 Server starting on :8080")
 	log.Fatal(app.Listen(":8080"))
