@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import logging
 import time
-import main as app_state
+import state as app_state
 from engine.retrieval.qdrant_client import get_client, search
 from engine.generation.ollama_client import generate
 

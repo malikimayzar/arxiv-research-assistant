@@ -8,6 +8,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/adaptor"
+	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -29,13 +30,13 @@ func main() {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
 	defer db.Close()
-	log.Println("✅ Connected to PostgreSQL")
+	log.Println("Connected to PostgreSQL")
 
 	mlClient := client.NewMLClient(getEnv("ML_SERVICE_URL", "http://localhost:8001"))
 	if err := mlClient.Ping(); err != nil {
-		log.Printf("⚠️  ML service not reachable: %v", err)
+		log.Printf("ML service not reachable: %v", err)
 	} else {
-		log.Println("✅ Connected to ML service")
+		log.Println("Connected to ML service")
 	}
 
 	app := fiber.New(fiber.Config{
@@ -43,6 +44,11 @@ func main() {
 		ErrorHandler: api.ErrorHandler,
 	})
 
+	app.Use(cors.New(cors.Config{
+		AllowOrigins: "*",
+		AllowMethods: "GET,POST,DELETE,OPTIONS",
+		AllowHeaders: "Content-Type,Authorization",
+	}))
 	app.Use(recover.New())
 	app.Use(middleware.RequestID())
 	app.Use(middleware.Metrics())
@@ -51,10 +57,19 @@ func main() {
 	}))
 
 	app.Get("/health", api.HealthHandler(db, mlClient))
-	app.Post("/query", api.QueryHandler(mlClient))
+
+	paperRepo := repository.NewPaperRepository(db)
+	papersHandler := api.NewPapersHandler(paperRepo)
+	app.Get("/papers", papersHandler.List)
+	app.Get("/papers/:id", papersHandler.GetByID)
+	app.Delete("/papers/:id", papersHandler.Delete)
+	// query log repo
+	logRepo := repository.NewQueryLogRepository(db)
+
+	app.Post("/query", api.QueryHandler(mlClient, logRepo))
+	app.Get("/query/history", api.QueryHistoryHandler(logRepo))
 	app.Get("/metrics", adaptor.HTTPHandler(promhttp.Handler()))
 
-	// Update goroutine metrics every 10s
 	go func() {
 		for {
 			middleware.SetActiveGoroutines(float64(runtime.NumGoroutine()))
@@ -62,7 +77,7 @@ func main() {
 		}
 	}()
 
-	log.Println("🚀 Server starting on :8080")
+	log.Println("Server starting on :8080")
 	log.Fatal(app.Listen(":8080"))
 }
 

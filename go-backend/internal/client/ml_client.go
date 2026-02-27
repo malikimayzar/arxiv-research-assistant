@@ -6,12 +6,17 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/sony/gobreaker"
 )
 
 type MLClient struct {
-	baseURL        string
-	httpClient     *http.Client
-	queryClient    *http.Client
+	baseURL     string
+	httpClient  *http.Client
+	queryClient *http.Client
+	queryCB     *gobreaker.CircuitBreaker
+	embedCB     *gobreaker.CircuitBreaker
+	ingestCB    *gobreaker.CircuitBreaker
 }
 
 func NewMLClient(baseURL string) *MLClient {
@@ -23,6 +28,9 @@ func NewMLClient(baseURL string) *MLClient {
 		queryClient: &http.Client{
 			Timeout: 600 * time.Second,
 		},
+		queryCB:  newCircuitBreaker("ml-query"),
+		embedCB:  newCircuitBreaker("ml-embed"),
+		ingestCB: newCircuitBreaker("ml-ingest"),
 	}
 }
 
@@ -42,26 +50,36 @@ func (c *MLClient) Embed(texts []string) (*EmbedResponse, error) {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	resp, err := c.httpClient.Post(
-		c.baseURL+"/embed",
-		"application/json",
-		bytes.NewBuffer(body),
-	)
+	result, err := c.embedCB.Execute(func() (interface{}, error) {
+		resp, err := c.httpClient.Post(
+			c.baseURL+"/embed",
+			"application/json",
+			bytes.NewBuffer(body),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("ml service request failed: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("ml service returned status %d", resp.StatusCode)
+		}
+
+		var result EmbedResponse
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return nil, fmt.Errorf("failed to decode response: %w", err)
+		}
+		return &result, nil
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("ml service request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("ml service returned status %d", resp.StatusCode)
+		if err == gobreaker.ErrOpenState {
+			return nil, fmt.Errorf("ml service unavailable (circuit open): %w", err)
+		}
+		return nil, err
 	}
 
-	var result EmbedResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return &result, nil
+	return result.(*EmbedResponse), nil
 }
 
 type ChunkRequest struct {
@@ -139,26 +157,36 @@ func (c *MLClient) Query(query string, topK int, model string, arxivID string) (
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	resp, err := c.queryClient.Post(
-		c.baseURL+"/query",
-		"application/json",
-		bytes.NewBuffer(body),
-	)
+	result, err := c.queryCB.Execute(func() (interface{}, error) {
+		resp, err := c.queryClient.Post(
+			c.baseURL+"/query",
+			"application/json",
+			bytes.NewBuffer(body),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("ml service query failed: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("ml service returned status %d", resp.StatusCode)
+		}
+
+		var result QueryMLResponse
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return nil, fmt.Errorf("failed to decode response: %w", err)
+		}
+		return &result, nil
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("ml service query failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("ml service returned status %d", resp.StatusCode)
+		if err == gobreaker.ErrOpenState {
+			return nil, fmt.Errorf("ml service unavailable (circuit open): %w", err)
+		}
+		return nil, err
 	}
 
-	var result QueryMLResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return &result, nil
+	return result.(*QueryMLResponse), nil
 }
 
 func (c *MLClient) Ping() error {
@@ -173,4 +201,25 @@ func (c *MLClient) Ping() error {
 	}
 
 	return nil
+}
+
+// State returns current circuit breaker states — useful for /health endpoint
+func (c *MLClient) CircuitBreakerStates() map[string]string {
+	stateStr := func(s gobreaker.State) string {
+		switch s {
+		case gobreaker.StateClosed:
+			return "closed"
+		case gobreaker.StateHalfOpen:
+			return "half-open"
+		case gobreaker.StateOpen:
+			return "open"
+		default:
+			return "unknown"
+		}
+	}
+	return map[string]string{
+		"query":  stateStr(c.queryCB.State()),
+		"embed":  stateStr(c.embedCB.State()),
+		"ingest": stateStr(c.ingestCB.State()),
+	}
 }

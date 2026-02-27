@@ -1,11 +1,12 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import logging
-import main as app_state
+import state as app_state
 from engine.ingestion.arxiv_fetcher import fetch_metadata
 from engine.ingestion.pdf_parser import download_and_parse_pdf
 from engine.ingestion.chunker import chunk_text
 from engine.retrieval.qdrant_client import get_client, ensure_collection, upsert_chunks
+from engine.db import get_connection, upsert_paper, insert_chunks
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -24,7 +25,6 @@ class IngestResponse(BaseModel):
 def ingest(request: IngestRequest):
     if not request.arxiv_ids:
         raise HTTPException(status_code=400, detail="arxiv_ids cannot be empty")
-    
     if app_state.model is None:
         raise HTTPException(status_code=503, detail="model not loaded")
 
@@ -39,36 +39,46 @@ def ingest(request: IngestRequest):
     if not papers:
         raise HTTPException(status_code=404, detail="No papers found")
 
-    for paper in papers:
-        try:
-            # Parse PDF
-            text = download_and_parse_pdf(paper.pdf_url)
-            
-            # Chunk
-            chunks = chunk_text(text, request.chunk_size, request.overlap)
-            
-            # Embed all chunks
-            embeddings = app_state.model.encode(chunks).tolist()
-            
-            # Store in Qdrant
-            chunk_dicts = [
-                {
-                    "text": chunk,
-                    "embedding": embeddings[i],
-                    "arxiv_id": paper.arxiv_id,
-                    "categories": paper.categories,
-                }
-                for i, chunk in enumerate(chunks)
-            ]
-            upsert_chunks(qdrant, chunk_dicts)
-            
-            ingested.append(paper.arxiv_id)
-            total_chunks += len(chunks)
-            logger.info(f"✅ Ingested {paper.arxiv_id}: {len(chunks)} chunks")
+    conn = get_connection()
+    try:
+        for paper in papers:
+            try:
+                # Parse PDF
+                text = download_and_parse_pdf(paper.pdf_url)
 
-        except Exception as e:
-            logger.error(f"❌ Failed to ingest {paper.arxiv_id}: {e}")
-            failed.append(paper.arxiv_id)
+                # Chunk
+                chunks = chunk_text(text, request.chunk_size, request.overlap)
+
+                # Embed
+                embeddings = app_state.model.encode(chunks).tolist()
+
+                # Store in Qdrant — capture returned IDs
+                chunk_dicts = [
+                    {
+                        "text": chunk,
+                        "embedding": embeddings[i],
+                        "arxiv_id": paper.arxiv_id,
+                        "categories": paper.categories,
+                    }
+                    for i, chunk in enumerate(chunks)
+                ]
+                qdrant_ids = upsert_chunks(qdrant, chunk_dicts)
+
+                # Store metadata in PostgreSQL
+                paper_id = upsert_paper(conn, paper)
+                insert_chunks(conn, paper_id, chunks, qdrant_ids or [])
+                conn.commit()
+
+                ingested.append(paper.arxiv_id)
+                total_chunks += len(chunks)
+                logger.info(f"✅ Ingested {paper.arxiv_id}: {len(chunks)} chunks")
+
+            except Exception as e:
+                conn.rollback()
+                logger.error(f"❌ Failed to ingest {paper.arxiv_id}: {e}")
+                failed.append(paper.arxiv_id)
+    finally:
+        conn.close()
 
     return IngestResponse(
         ingested=ingested,

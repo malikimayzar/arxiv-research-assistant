@@ -1,5 +1,5 @@
 import logging
-import main as app_state
+import state as app_state
 from engine.generation.ollama_client import generate
 
 logger = logging.getLogger(__name__)
