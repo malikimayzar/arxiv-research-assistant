@@ -43,7 +43,7 @@ def generate(
 
     try:
         with httpx.Client(
-            timeout=httpx.Timeout(120.0, connect=5.0)
+            timeout=httpx.Timeout(300.0, connect=10.0)
         ) as client:
             response = client.post(
                 f"{OLLAMA_URL}/api/generate",

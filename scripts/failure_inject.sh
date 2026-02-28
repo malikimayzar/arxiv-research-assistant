@@ -1,4 +1,3 @@
-#!/bin/bash
 SCENARIO=$1
 case $SCENARIO in
   "kill-qdrant")
