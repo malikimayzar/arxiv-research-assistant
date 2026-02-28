@@ -1,46 +1,93 @@
 import httpx
 import logging
 import time
+from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
 OLLAMA_URL = "http://localhost:11434"
+DEFAULT_MODEL = "phi3:mini"
 
-def generate(query: str, context_chunks: list[str], model: str = "phi3:mini") -> dict:
-    context = "\n\n".join([chunk[:200] for chunk in context_chunks[:2]])
-    
-    prompt = f"""Answer briefly based on context only.
+class OllamaError(Exception):
+    pass
 
-Context: {context}
+def build_prompt(query: str, context_chunks: List[str]) -> str:
+    safe_chunks = [
+        chunk.replace("\n", " ").strip()[:300]
+        for chunk in context_chunks[:2]
+        if chunk.strip()
+    ]
 
-Question: {query}
+    context = "\n---\n".join(safe_chunks)
 
-Short answer:"""
+    return (
+        "Answer strictly based on the provided context.\n"
+        "If the answer is not in the context, say \"Not found in context.\".\n\n"
+        f"Context:\n{context}\n\n"
+        f"Question: {query}\n\n"
+        "Answer:"
+    )
 
+
+def generate(
+    query: str,
+    context_chunks: List[str],
+    model: str = DEFAULT_MODEL,
+) -> Dict[str, Any]:
+
+    if not query.strip():
+        raise ValueError("Query is empty")
+
+    prompt = build_prompt(query, context_chunks)
     start = time.time()
-    
-    with httpx.Client(timeout=600) as client:
-        response = client.post(
-            f"{OLLAMA_URL}/api/generate",
-            json={
-                "model": model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "num_predict": 150,
-                    "temperature": 0.1,
-                }
-            }
-        )
-        response.raise_for_status()
-    
+
+    try:
+        with httpx.Client(
+            timeout=httpx.Timeout(120.0, connect=5.0)
+        ) as client:
+            response = client.post(
+                f"{OLLAMA_URL}/api/generate",
+                json={
+                    "model": model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "num_predict": 150,
+                        "temperature": 0.1,
+                    },
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+
+    except httpx.ConnectError as e:
+        logger.error("Ollama service unreachable")
+        raise OllamaError("ollama_unreachable") from e
+
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Ollama HTTP error: {e.response.text}")
+        raise OllamaError("ollama_http_error") from e
+
+    except Exception as e:
+        logger.exception("Unexpected Ollama failure")
+        raise OllamaError("ollama_unknown_error") from e
+
     latency_ms = int((time.time() - start) * 1000)
-    result = response.json()
-    
-    logger.info(f"Generated answer in {latency_ms}ms using {model}")
-    
+
+    answer = payload.get("response", "").strip()
+    if not answer:
+        answer = "Not found in context."
+
+    logger.info(
+        "Ollama generation | model=%s latency=%dms chars=%d",
+        model,
+        latency_ms,
+        len(answer),
+    )
+
     return {
-        "answer": result["response"].strip(),
+        "answer": answer,
         "latency_ms": latency_ms,
         "model": model,
+        "source": "ollama",
     }

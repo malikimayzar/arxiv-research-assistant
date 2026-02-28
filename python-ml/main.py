@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     logger.info("Loading embedding model...")
     state.model = SentenceTransformer("all-MiniLM-L6-v2")
-    logger.info("✅ Embedding model loaded")
+    logger.info("Embedding model loaded")
     yield
 
 app = FastAPI(title="ArXiv ML Service", version="0.1.0", lifespan=lifespan)
