@@ -214,4 +214,6 @@ arxiv-research-assistant/
 
 ---
 
+**Live Demo:** https://arxiv-research-assistant-production.up.railway.app
+
 *Built by [Maliki Mayzar](https://github.com/malikimayzar) — 2026*
