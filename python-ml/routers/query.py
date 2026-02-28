@@ -1,10 +1,11 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import logging
+import os
 import time
 import state as app_state
 from engine.retrieval.qdrant_client import get_client, search
-from engine.generation.ollama_client import generate
+from engine.generation import ollama_client, groq_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -12,7 +13,7 @@ router = APIRouter()
 class QueryRequest(BaseModel):
     query: str
     top_k: int = 5
-    model: str = "mistral"
+    model: str = "phi3:mini"
     arxiv_id: str | None = None
 
 class QueryResponse(BaseModel):
@@ -22,18 +23,20 @@ class QueryResponse(BaseModel):
     generation_ms: int
     model: str
 
+def get_provider():
+    return os.getenv("LLM_PROVIDER", "ollama")  # "ollama" or "groq"
+
 @router.post("/query", response_model=QueryResponse)
 def query(request: QueryRequest):
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="query cannot be empty")
-    
     if app_state.model is None:
         raise HTTPException(status_code=503, detail="model not loaded")
 
     # Embed query
     t0 = time.time()
     query_vector = app_state.model.encode([request.query])[0].tolist()
-    
+
     # Search Qdrant
     qdrant = get_client()
     results = search(qdrant, query_vector, request.top_k, request.arxiv_id)
@@ -42,14 +45,24 @@ def query(request: QueryRequest):
     if not results:
         raise HTTPException(status_code=404, detail="No relevant chunks found")
 
-    # Generate answer
+    # Generate answer — provider switching
     context_chunks = [r["text"] for r in results]
-    generation = generate(request.query, context_chunks, request.model)
+    provider = get_provider()
+
+    try:
+        if provider == "groq":
+            model = os.getenv("GROQ_MODEL", "llama3-8b-8192")
+            generation = groq_client.generate(request.query, context_chunks, model)
+        else:
+            generation = ollama_client.generate(request.query, context_chunks, request.model)
+    except Exception as e:
+        logger.error(f"Generation failed ({provider}): {e}")
+        raise HTTPException(status_code=500, detail=f"generation failed: {e}")
 
     return QueryResponse(
         answer=generation["answer"],
         sources=results,
         retrieval_ms=retrieval_ms,
         generation_ms=generation["latency_ms"],
-        model=request.model,
+        model=generation["model"],
     )
