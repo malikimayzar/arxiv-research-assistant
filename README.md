@@ -22,7 +22,7 @@ Browser / CLI
      ▼
 Go Fiber API :8080
      │
-     ├── PostgreSQL :5432   (paper metadata, query logs)
+     ├── PostgreSQL :5432   (paper metadata, query logs, versioning)
      │
      └── Python FastAPI :8001
                │
@@ -43,7 +43,7 @@ Grafana :3000     ←  dashboards
 | Backend | Go + Fiber | Concurrency, explicit error handling, performance |
 | ML Service | Python + FastAPI | Best ML ecosystem, clean service boundary |
 | Vector DB | Qdrant | Production-grade, filterable, REST API |
-| Relational DB | PostgreSQL | Metadata, query logs, versioning |
+| Relational DB | PostgreSQL | Metadata, query logs, prompt/embedding versioning |
 | Cache | Redis | Embedding cache, session |
 | LLM | Ollama (phi3:mini) | Fully local, no API cost |
 | Monitoring | Prometheus + Grafana | Full observability stack |
@@ -111,9 +111,7 @@ curl -X POST http://localhost:8080/query \
 
 ## Observability
 
-Prometheus scrapes both services. Grafana dashboards available at `http://localhost:3000`.
-
-**Tracked metrics:**
+Prometheus scrapes both services. Grafana dashboards at `http://localhost:3000`.
 
 | Metric | Type | What it detects |
 |--------|------|-----------------|
@@ -132,16 +130,16 @@ Prometheus scrapes both services. Grafana dashboards available at `http://localh
 
 5 failure scenarios tested and documented in `docs/postmortem/`:
 ```bash
-bash scripts/failure_inject.sh kill-qdrant       # Scenario 1
-bash scripts/failure_inject.sh kill-postgres     # Scenario 2
-bash scripts/failure_inject.sh kill-ml           # Scenario 3
-bash scripts/failure_inject.sh inject-garbage    # Scenario 4
-bash scripts/failure_inject.sh fill-disk         # Scenario 5
+bash scripts/failure_inject.sh kill-qdrant       # Scenario 1: Qdrant down
+bash scripts/failure_inject.sh kill-postgres     # Scenario 2: PostgreSQL down
+bash scripts/failure_inject.sh kill-ml           # Scenario 3: ML service down
+bash scripts/failure_inject.sh inject-garbage    # Scenario 4: Noisy data
+bash scripts/failure_inject.sh fill-disk         # Scenario 5: Disk pressure
 
 bash scripts/failure_inject.sh status            # Check system
 ```
 
-Circuit breaker in Go backend trips after 5 failures — ML service down returns graceful error instead of hanging.
+Circuit breaker trips after 5 failures — ML service down returns graceful error instead of hanging.
 
 ---
 
@@ -167,6 +165,7 @@ make ingest     # Ingest sample paper (2312.10997)
 make ablation   # Run ablation study
 make up         # Docker services up
 make down       # Docker services down
+make ps         # Docker services status
 ```
 
 ---
@@ -174,21 +173,43 @@ make down       # Docker services down
 ## Project Structure
 ```
 arxiv-research-assistant/
-├── go-backend/           # Go API service
-│   ├── cmd/server/       # Entry point
+├── .github/workflows/        # CI/CD — lint.yml + test.yml
+├── go-backend/
+│   ├── cmd/server/main.go    # Entry point
 │   ├── internal/
-│   │   ├── api/          # HTTP handlers
-│   │   ├── client/       # ML service client + circuit breaker
-│   │   ├── middleware/   # Prometheus metrics, request ID
-│   │   └── repository/   # PostgreSQL queries
-│   └── migrations/       # SQL migrations
-├── python-ml/            # Python ML service
-│   ├── routers/          # FastAPI endpoints
-│   └── engine/           # Ingestion, retrieval, generation, evaluation
-├── infra/                # Docker Compose, Prometheus, Grafana
-├── scripts/              # Chaos testing, ablation study
-├── docs/                 # Architecture, threat model, postmortem
-└── tests/                # Unit + integration tests
+│   │   ├── api/              # HTTP handlers (health, papers, query)
+│   │   ├── client/           # ML service client + circuit breaker
+│   │   ├── middleware/       # Prometheus metrics, request ID
+│   │   ├── models/           # Domain models
+│   │   └── repository/       # PostgreSQL (papers, query_logs, db)
+│   └── migrations/           # SQL migrations
+├── python-ml/
+│   ├── engine/
+│   │   ├── evaluation/       # Faithfulness scoring
+│   │   ├── generation/       # Ollama client
+│   │   ├── ingestion/        # ArXiv fetcher, PDF parser, chunker
+│   │   └── retrieval/        # Qdrant client
+│   ├── routers/              # FastAPI endpoints
+│   ├── main.py               # FastAPI app + Prometheus
+│   └── state.py              # Shared model state
+├── infra/
+│   ├── docker-compose.yml    # All services
+│   ├── grafana/              # Dashboard configs
+│   ├── postgres/init.sql     # DB schema
+│   └── prometheus/           # Scrape config
+├── scripts/
+│   ├── failure_inject.sh     # Chaos testing
+│   └── ablation_study.sh     # Retrieval benchmarks
+├── tests/
+│   ├── unit/
+│   ├── integration/
+│   └── eval/
+├── docs/
+│   ├── architecture.md
+│   ├── threat_model.md
+│   └── postmortem/           # 5 failure scenario analyses
+├── ui/index.html             # Web UI
+└── Makefile
 ```
 
 ---
