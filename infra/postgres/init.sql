@@ -45,3 +45,29 @@ CREATE INDEX IF NOT EXISTS idx_papers_arxiv_id ON papers(arxiv_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_paper_id ON chunks(paper_id);
 CREATE INDEX IF NOT EXISTS idx_query_logs_created_at ON query_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_query_logs_failure_mode ON query_logs(failure_mode);
+
+-- Prompt versions table
+CREATE TABLE IF NOT EXISTS prompt_versions (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  version     VARCHAR(20) NOT NULL UNIQUE,
+  name        VARCHAR(100) NOT NULL,
+  template    TEXT NOT NULL,
+  description TEXT,
+  is_active   BOOLEAN DEFAULT FALSE,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Embedding versions table
+CREATE TABLE IF NOT EXISTS embedding_versions (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  model_name  VARCHAR(100) NOT NULL,
+  model_dim   INT NOT NULL,
+  batch_id    UUID DEFAULT gen_random_uuid(),
+  paper_count INT DEFAULT 0,
+  chunk_count INT DEFAULT 0,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Version tracking columns on query_logs
+ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS prompt_version VARCHAR(20) DEFAULT 'v1.0';
+ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS embedding_version VARCHAR(100) DEFAULT 'all-MiniLM-L6-v2';

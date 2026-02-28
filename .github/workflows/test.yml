@@ -10,7 +10,7 @@ jobs:
   test-go:
     name: Go Tests
     runs-on: ubuntu-latest
-    
+
     services:
       postgres:
         image: postgres:15
@@ -36,16 +36,9 @@ jobs:
           cache-dependency-path: go-backend/go.sum
 
       - name: Run migrations
-        working-directory: go-backend
-        env:
-          DB_HOST: localhost
-          DB_PORT: 5432
-          DB_USER: arxiv
-          DB_PASSWORD: arxiv_secret
-          DB_NAME: arxiv_db
         run: |
-          go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
-          migrate -path migrations -database "postgres://arxiv:arxiv_secret@localhost:5432/arxiv_db?sslmode=disable" up
+          PGPASSWORD=arxiv_secret psql -h localhost -U arxiv -d arxiv_db -f infra/postgres/init.sql
+          PGPASSWORD=arxiv_secret psql -h localhost -U arxiv -d arxiv_db -f go-backend/migrations/003_versioning.up.sql
 
       - name: Go Build
         working-directory: go-backend
