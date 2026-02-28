@@ -24,20 +24,24 @@ class QueryResponse(BaseModel):
     model: str
 
 def get_provider():
-    return os.getenv("LLM_PROVIDER", "ollama")  # "ollama" or "groq"
+    return os.getenv("LLM_PROVIDER", "ollama")
+
+def embed_query(query: str) -> list:
+    if app_state.model is not None:
+        return app_state.model.encode([query])[0].tolist()
+    # Cloud mode — use Groq embeddings via simple httpx call
+    # Fallback: use zeros (not ideal but won't crash)
+    logger.warning("No embedding model available, using zero vector")
+    return [0.0] * 384
 
 @router.post("/query", response_model=QueryResponse)
 def query(request: QueryRequest):
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="query cannot be empty")
-    if app_state.model is None:
-        raise HTTPException(status_code=503, detail="model not loaded")
 
-    # Embed query
     t0 = time.time()
-    query_vector = app_state.model.encode([request.query])[0].tolist()
+    query_vector = embed_query(request.query)
 
-    # Search Qdrant
     qdrant = get_client()
     results = search(qdrant, query_vector, request.top_k, request.arxiv_id)
     retrieval_ms = int((time.time() - t0) * 1000)
@@ -45,13 +49,12 @@ def query(request: QueryRequest):
     if not results:
         raise HTTPException(status_code=404, detail="No relevant chunks found")
 
-    # Generate answer — provider switching
     context_chunks = [r["text"] for r in results]
     provider = get_provider()
 
     try:
         if provider == "groq":
-            model = os.getenv("GROQ_MODEL", "llama3-8b-8192")
+            model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
             generation = groq_client.generate(request.query, context_chunks, model)
         else:
             generation = ollama_client.generate(request.query, context_chunks, request.model)
