@@ -2,9 +2,6 @@
 builder = "nixpacks"
 
 [deploy]
-startCommand = "./main"
+startCommand = "./out"
 healthcheckPath = "/health"
 healthcheckTimeout = 30
-
-[[services]]
-name = "go-backend"
