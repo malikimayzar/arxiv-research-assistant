@@ -7,6 +7,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/malikimayzar/arxiv-research-assistant/internal/client"
+	"github.com/malikimayzar/arxiv-research-assistant/internal/middleware"
 	"github.com/malikimayzar/arxiv-research-assistant/internal/repository"
 )
 
@@ -45,11 +46,15 @@ func QueryHandler(ml *client.MLClient, logRepo repository.QueryLogRepository) fi
 
 		result, err := ml.Query(req.Query, req.TopK, req.Model, req.ArxivID)
 		if err != nil {
+			middleware.IncFailureMode("error")
 			return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 		}
 
-		// Log ke PostgreSQL — sync, tapi dengan timeout terpisah
-		var logID string
+		// Observe metrics
+		middleware.ObserveQdrantSearch(float64(result.RetrievalMs) / 1000)
+		middleware.ObserveOllamaGeneration(float64(result.GenerationMs) / 1000)
+
+		// Log to PostgreSQL async
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -68,13 +73,19 @@ func QueryHandler(ml *client.MLClient, logRepo repository.QueryLogRepository) fi
 			_ = logged
 		}()
 
+		// Track failure mode
+		if result.Answer == "Not found in context." {
+			middleware.IncFailureMode("insufficient_ctx")
+		} else {
+			middleware.IncFailureMode("correct")
+		}
+
 		return c.JSON(QueryResponse{
 			Answer:       result.Answer,
 			Sources:      result.Sources,
 			RetrievalMs:  result.RetrievalMs,
 			GenerationMs: result.GenerationMs,
 			Model:        result.Model,
-			LogID:        logID,
 		})
 	}
 }

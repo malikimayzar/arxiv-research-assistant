@@ -73,6 +73,7 @@ func main() {
 	go func() {
 		for {
 			middleware.SetActiveGoroutines(float64(runtime.NumGoroutine()))
+			middleware.SetPostgresConnections(float64(db.Stats().OpenConnections))
 			time.Sleep(10 * time.Second)
 		}
 	}()
