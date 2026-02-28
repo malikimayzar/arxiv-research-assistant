@@ -43,7 +43,7 @@ FAILURE_MODE: [one of: correct, hallucination, insufficient_context, mixed]"""
         if line.startswith("SCORE:"):
             try:
                 score = float(line.replace("SCORE:", "").strip())
-            except:
+            except ValueError:
                 pass
         if line.startswith("FAILURE_MODE:"):
             failure_mode = line.replace("FAILURE_MODE:", "").strip().lower()
