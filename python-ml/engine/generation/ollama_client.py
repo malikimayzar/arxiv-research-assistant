@@ -13,21 +13,19 @@ class OllamaError(Exception):
 
 def build_prompt(query: str, context_chunks: List[str]) -> str:
     safe_chunks = [
-        chunk.replace("\n", " ").strip()[:300]
-        for chunk in context_chunks[:2]
+        chunk.replace("\n", " ").strip()[:800]
+        for chunk in context_chunks[:5]
         if chunk.strip()
     ]
-
     context = "\n---\n".join(safe_chunks)
-
     return (
-        "Answer strictly based on the provided context.\n"
-        "If the answer is not in the context, say \"Not found in context.\".\n\n"
+        "You are a helpful research assistant. Answer the question using the context below.\n"
+        "Be concise. If the context contains relevant information, use it to answer.\n"
+        "Only say 'Not found in context.' if the context has absolutely no relevant information.\n\n"
         f"Context:\n{context}\n\n"
         f"Question: {query}\n\n"
         "Answer:"
     )
-
 
 def generate(
     query: str,
@@ -43,7 +41,7 @@ def generate(
 
     try:
         with httpx.Client(
-            timeout=httpx.Timeout(300.0, connect=10.0)
+            timeout=httpx.Timeout(600.0, connect=10.0)
         ) as client:
             response = client.post(
                 f"{OLLAMA_URL}/api/generate",
