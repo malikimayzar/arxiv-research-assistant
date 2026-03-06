@@ -16,3 +16,6 @@ go-backend/tmp/
 .DS_Store
 __pycache__/
 *.pyc
+nohup.out
+go-backend/nohup.out
+python-ml/nohup.out
